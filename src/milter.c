@@ -79,11 +79,15 @@ static privdata_t* new_privdata(SMFICTX* ctx)
     free_privdata(ctx);
     privdata_t* priv = malloc(sizeof(privdata_t));
     if (priv == NULL)
+    {
+        log_error("out of memory");
         return NULL;
+    }
     priv->envfrom = NULL;
     priv->envrcpt = list_create();
     if (priv->envrcpt == NULL)
     {
+        log_error("out of memory");
         free(priv);
         return NULL;
     }
@@ -99,6 +103,7 @@ static sfsistat on_envfrom(SMFICTX* ctx, char** argv)
     priv->envfrom = strip_brackets(argv[0]);
     if (priv->envfrom == NULL)
     {
+        log_error("missing brackets in envelope sender: %s", argv[0]);
         free_privdata(ctx);
         return SMFIS_TEMPFAIL;
     }
@@ -109,10 +114,16 @@ static sfsistat on_envrcpt(SMFICTX* ctx, char** argv)
 {
     privdata_t* priv = smfi_getpriv(ctx);
     if (priv == NULL)
+    {
+        log_error("%s: assertion failure: state is null",
+                  smfi_getsymval(ctx, "i"));
         return SMFIS_TEMPFAIL;
+    }
     char* rcpt = strip_brackets(argv[0]);
     if (rcpt == NULL)
     {
+        log_error("%s: missing brackets in envelope recipient: %s",
+                  smfi_getsymval(ctx, "i"), argv[0]);
         free_privdata(ctx);
         return SMFIS_TEMPFAIL;
     }
@@ -120,6 +131,7 @@ static sfsistat on_envrcpt(SMFICTX* ctx, char** argv)
     {
         free(rcpt);
         free_privdata(ctx);
+        log_error("%s: out of memory", smfi_getsymval(ctx, "i"));
         return SMFIS_TEMPFAIL;
     }
     return SMFIS_CONTINUE;
@@ -131,12 +143,19 @@ static sfsistat on_eom(SMFICTX* ctx)
     database_t* db = NULL;
     privdata_t* priv = smfi_getpriv(ctx);
     if (priv == NULL)
+    {
+        log_error("%s: assertion failure: state is null",
+                  smfi_getsymval(ctx, "i"));
         goto done;
+    }
     if (cfg_getint(g_cfg, "original-envelope") == SRS_ENVELOPE_DATABASE)
     {
         db = database_connect(cfg_getstr(g_cfg, "envelope-database"), false);
         if (db == NULL)
+        {
+            log_error("%s: failed to open database", smfi_getsymval(ctx, "i"));
             goto done;
+        }
     }
     size_t rcpt_size = list_size(priv->envrcpt);
     bool error = false;
@@ -159,20 +178,31 @@ static sfsistat on_eom(SMFICTX* ctx)
         {
             char* bracketed_old_rcpt = add_brackets(rcpt);
             char* bracketed_new_rcpt = add_brackets(rewritten);
+            log_debug("%s: recipient %s can be rewritten as %s",
+                      smfi_getsymval(ctx, "i"), bracketed_old_rcpt,
+                      bracketed_new_rcpt);
             free(rewritten);
             if (smfi_delrcpt(ctx, bracketed_old_rcpt) != MI_SUCCESS)
             {
+                log_error("%s: failed to remove recipient %s",
+                          smfi_getsymval(ctx, "i"), bracketed_old_rcpt);
                 free(bracketed_old_rcpt);
                 free(bracketed_new_rcpt);
                 goto done;
             }
+            log_debug("%s: removed recipient %s", smfi_getsymval(ctx, "i"),
+                      bracketed_old_rcpt);
             if (smfi_addrcpt(ctx, bracketed_new_rcpt)
                 != MI_SUCCESS)  // TODO maybe add ESMTP arguments?
             {
+                log_error("%s: failed to add recipient %s",
+                          smfi_getsymval(ctx, "i"), bracketed_new_rcpt);
                 free(bracketed_old_rcpt);
                 free(bracketed_new_rcpt);
                 goto done;
             }
+            log_debug("%s: added recipient %s", smfi_getsymval(ctx, "i"),
+                      bracketed_new_rcpt);
             free(bracketed_old_rcpt);
             free(bracketed_new_rcpt);
         }
@@ -195,9 +225,14 @@ static sfsistat on_eom(SMFICTX* ctx)
                              NULL)
                 != MI_SUCCESS)  // TODO maybe add ESMTP arguments?
             {
+                log_error("%s: failed to change sender from <%s> to %s",
+                          smfi_getsymval(ctx, "i"), priv->envfrom,
+                          bracketed_from);
                 free(bracketed_from);
                 goto done;
             }
+            log_error("%s: changed envelope sender from <%s> to %s",
+                      smfi_getsymval(ctx, "i"), priv->envfrom, bracketed_from);
             free(bracketed_from);
         }
     }
