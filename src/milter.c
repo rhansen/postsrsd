@@ -140,12 +140,21 @@ static sfsistat on_eom(SMFICTX* ctx)
     }
     size_t rcpt_size = list_size(priv->envrcpt);
     bool error = false;
+    bool rcpts_all_local = true;
     for (size_t i = 0; i < rcpt_size; ++i)
     {
         char* rcpt = (char*)list_get(priv->envrcpt, i);
         char* rewritten = postsrsd_reverse(rcpt, g_srs, db, &error, NULL);
         if (error)
             goto done;
+        if (rcpts_all_local) {
+            const char* at = strchr(rewritten ? rewritten : rcpt, '@');
+            // Assumption: If recipient address lacks '@', then it is not local.  The opposite is
+            // more likely to be true, but a false negative (which would result in an unnecessary
+            // rewrite of the sender) is better than a false positive (which might preserve the
+            // sender when a rewrite is necessary).
+            rcpts_all_local = at != NULL && domain_set_contains(g_local_domains, at + 1);
+        }
         if (rewritten)
         {
             char* bracketed_old_rcpt = add_brackets(rcpt);
@@ -168,7 +177,10 @@ static sfsistat on_eom(SMFICTX* ctx)
             free(bracketed_new_rcpt);
         }
     }
-    if (*priv->envfrom)
+    if (rcpts_all_local)
+        log_debug("%s: sender <%s> not rewritten because all recipients are local",
+                  smfi_getsymval(ctx, "i"), priv->envfrom);
+    else if (*priv->envfrom)
     {
         // TODO check if mail is actually forwarded
         char* rewritten = postsrsd_forward(priv->envfrom, g_srs_domain, g_srs,
