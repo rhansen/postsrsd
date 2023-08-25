@@ -153,8 +153,7 @@ Frequently Asked Questions
 * **Can I configure PostSRSd so it will only rewrite the envelope sender if the
   email is not delivered locally?**
 
-  This is not supported currently but might be added to the milter at some
-  point in the future.
+  Yes, if you use the experimental milter.
 
   If PostSRSd is integrated with Postfix using the ``canonical`` maps, it is
   almost impossible, because the canonicalization occurs before any routing
